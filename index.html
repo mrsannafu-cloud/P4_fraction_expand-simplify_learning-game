@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <title>分數魔法王國 - 穩定修正版</title>
+    <style>
+        :root { --main-bg: #fffcf2; --magic-blue: #a1c4fd; --magic-pink: #ff9a9e; --text-dark: #444; }
+        body { font-family: 'Microsoft JhengHei', sans-serif; background: var(--main-bg); display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+        
+        #game-box { 
+            background: white; padding: 30px; border-radius: 30px; 
+            box-shadow: 0 15px 35px rgba(0,0,0,0.1); 
+            width: 420px; text-align: center; border: 6px solid var(--magic-pink);
+            position: relative; overflow: hidden;
+        }
+
+        h1 { color: #ff6b6b; margin-top: 0; font-size: 24px; }
+
+        /* 頂部資訊 */
+        .info-bar { display: flex; justify-content: space-between; margin-bottom: 20px; }
+        .stat-item { background: #fff0f1; padding: 5px 15px; border-radius: 20px; color: #ff6b6b; font-weight: bold; font-size: 14px; }
+
+        /* 分數顯示核心 */
+        .fraction-wrap { display: flex; align-items: center; justify-content: center; font-size: 36px; margin: 30px 0; color: var(--text-dark); }
+        .frac { display: inline-flex; flex-direction: column; align-items: center; min-width: 60px; }
+        .num { border-bottom: 4px solid var(--text-dark); width: 100%; padding-bottom: 4px; text-align: center; }
+        .den { padding-top: 4px; width: 100%; text-align: center; }
+        .symbol { margin: 0 20px; font-weight: bold; color: var(--magic-pink); }
+        
+        input { 
+            width: 70px; font-size: 28px; text-align: center; 
+            border: 3px solid var(--magic-blue); border-radius: 12px; 
+            background: #fdfdfd; outline: none;
+        }
+
+        .btn { 
+            background: var(--magic-pink); color: white; border: none; 
+            padding: 12px 25px; border-radius: 50px; font-size: 18px; 
+            cursor: pointer; transition: 0.2s; box-shadow: 0 4px 0 #e58a8e;
+            margin: 5px;
+        }
+        .btn:hover { transform: translateY(-2px); filter: brightness(1.05); }
+        .btn:active { transform: translateY(2px); box-shadow: none; }
+        .btn-blue { background: var(--magic-blue); box-shadow: 0 4px 0 #89a7d6; }
+
+        #msg { margin-top: 15px; min-height: 50px; font-size: 15px; line-height: 1.5; color: #666; }
+
+        /* 彈窗畫面 */
+        .overlay { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+            background: white; display: none; flex-direction: column; 
+            justify-content: center; align-items: center; z-index: 100;
+        }
+        .show { display: flex; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<div id="game-box">
+    <div id="screen-menu">
+        <h1>✨ 分數魔法王國 ✨</h1>
+        <p>小魔法師，選擇你要練習的題目：</p>
+        <button class="btn btn-blue" onclick="startFlow('expand')">🔵 擴分魔法 (變大)</button>
+        <button class="btn btn-blue" onclick="startFlow('reduce')">🔴 約分魔法 (變小)</button>
+    </div>
+
+    <div id="screen-game" class="hidden">
+        <div class="info-bar">
+            <div class="stat-item">💰 分數: <span id="ui-score">0</span></div>
+            <div class="stat-item" id="ui-level-tag">第 1 關</div>
+        </div>
+        <p style="font-size: 13px; color: #999;">第 <span id="ui-step">1</span> / 5 題</p>
+
+        <div class="fraction-wrap">
+            <div class="frac">
+                <div class="num" id="l-num">1</div>
+                <div class="den" id="l-den">2</div>
+            </div>
+            <div class="symbol">=</div>
+            <div class="frac">
+                <div class="num" id="r-num">?</div>
+                <div class="den" id="r-den">?</div>
+            </div>
+        </div>
+
+        <button class="btn" onclick="handleCheck()">施放魔法！</button>
+        <div id="msg">觀察左邊到右邊的倍數變化...</div>
+    </div>
+
+    <div id="screen-modal" class="overlay">
+        <h2 id="modal-title">🎉 恭喜過關！</h2>
+        <p id="modal-desc">做得好！準備好迎接下一關了嗎？</p>
+        <div id="modal-btns">
+            <button class="btn" onclick="goNextLevel()">💪 繼續挑戰</button>
+            <button class="btn btn-blue" style="background:#bbb; box-shadow: 0 4px 0 #999;" onclick="location.reload()">🏠 返回主頁</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let state = { mode: '', level: 1, step: 1, score: 0 };
+    let currentProblem = { ans: 0, mult: 0 };
+
+    function startFlow(mode) {
+        state.mode = mode;
+        document.getElementById('screen-menu').classList.add('hidden');
+        document.getElementById('screen-game').classList.remove('hidden');
+        newQuestion();
+    }
+
+    function newQuestion() {
+        document.getElementById('msg').innerHTML = "觀察數字的變化，填入答案...";
+        document.getElementById('ui-level-tag').innerText = "第 " + state.level + " 關";
+        document.getElementById('ui-step').innerText = state.step;
+        document.getElementById('ui-score').innerText = state.score;
+
+        // 1. 生成最簡分數
+        let b = Math.floor(Math.random() * 8) + 2; 
+        let a = Math.floor(Math.random() * (b - 1)) + 1;
+        const gcd = (x, y) => y === 0 ? x : gcd(y, x % y);
+        let common = gcd(a, b);
+        a /= common; b /= common;
+
+        // 2. 計算倍數 (分母上限 250)
+        let maxMult = Math.floor(250 / b);
+        let currentRange = state.level * 3 + 2; 
+        let m = Math.floor(Math.random() * Math.min(maxMult - 1, currentRange)) + 2;
+        currentProblem.mult = m;
+
+        // 3. 設定左右分數
+        let ln, ld, rn, rd;
+        if (state.mode === 'expand') {
+            ln = a; ld = b; rn = a * m; rd = b * m;
+        } else {
+            ln = a * m; ld = b * m; rn = a; rd = b;
+        }
+
+        // 4. 隨機填空位置
+        let isNum = Math.random() > 0.5;
+        document.getElementById('l-num').innerText = ln;
+        document.getElementById('l-den').innerText = ld;
+
+        if (isNum) {
+            document.getElementById('r-num').innerHTML = '<input type="number" id="user-input">';
+            document.getElementById('r-den').innerText = rd;
+            currentProblem.ans = rn;
+        } else {
+            document.getElementById('r-num').innerText = rn;
+            document.getElementById('r-den').innerHTML = '<input type="number" id="user-input">';
+            currentProblem.ans = rd;
+        }
+
+        const input = document.getElementById('user-input');
+        input.focus();
+        input.onkeypress = (e) => { if(e.key === 'Enter') handleCheck(); };
+    }
+
+    function handleCheck() {
+        let val = parseInt(document.getElementById('user-input').value);
+        let msg = document.getElementById('msg');
+
+        if (val === currentProblem.ans) {
+            state.score += 10;
+            document.getElementById('ui-score').innerText = state.score;
+            msg.innerHTML = "<b style='color:green'>✨ 太聰明了！答對囉！</b>";
+            
+            setTimeout(() => {
+                if (state.step < 5) {
+                    state.step++;
+                    newQuestion();
+                } else {
+                    showModal();
+                }
+            }, 1000);
+        } else {
+            let m = currentProblem.mult;
+            let tip = state.mode === 'expand' ? 
+                `提示：分母或分子擴大了 ${m} 倍，另一邊也要乘 ${m} 哦！` : 
+                `提示：分母或分子縮小了 ${m} 倍，另一邊也要除以 ${m} 哦！`;
+            msg.innerHTML = `<span style='color:red'>差一點點！再想一下...</span><br><small>${tip}</small>`;
+        }
+    }
+
+    function showModal() {
+        const modal = document.getElementById('screen-modal');
+        const title = document.getElementById('modal-title');
+        const desc = document.getElementById('modal-desc');
+        const btns = document.getElementById('modal-btns');
+
+        modal.classList.add('show');
+
+        if (state.level >= 5) {
+            title.innerText = "🏆 終極魔法師誕生！";
+            desc.innerText = `你完美通過了第 5 關挑戰！\n最終總分：${state.score}`;
+            // 隱藏繼續按鈕
+            btns.innerHTML = `<button class="btn btn-blue" onclick="location.reload()">🏠 返回主頁重新挑戰</button>`;
+        } else {
+            title.innerText = `🎉 完成第 ${state.level} 關！`;
+            desc.innerText = `目前得分：${state.score}\n你表現得非常好，要繼續前進嗎？`;
+        }
+    }
+
+    function goNextLevel() {
+        state.level++;
+        state.step = 1;
+        document.getElementById('screen-modal').classList.remove('show');
+        newQuestion();
+    }
+</script>
+
+</body>
+</html>
